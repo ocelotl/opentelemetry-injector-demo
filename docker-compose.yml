@@ -1,35 +1,323 @@
+# ============================================================================
+# Docker Compose Configuration
+# ============================================================================
+#
+# Docker Compose allows us to define and run multiple containers together
+# as a single application stack.
+#
+# In this demo, we have two main services:
+#
+#   1. app
+#      - The Node.js HTTP application
+#
+#   2. collector
+#      - The OpenTelemetry Collector
+#
+# The overall architecture looks like this:
+#
+#   +-------------------+
+#   | app container     |
+#   | Node.js server    |
+#   +-------------------+
+#             |
+#             | OTLP telemetry
+#             v
+#   +-------------------+
+#   | collector         |
+#   | OTel Collector    |
+#   +-------------------+
+#             |
+#             | debug exporter
+#             v
+#   Collector logs
+#
+# Docker Compose automatically creates:
+#
+# - a shared network
+# - DNS resolution between containers
+# - lifecycle orchestration
+#
+# This means containers can communicate using service names like:
+#
+#   collector:4317
+#
+# instead of needing raw IP addresses.
+#
+# ============================================================================
+
 services:
+
+  # ==========================================================================
+  # Application Service
+  # ==========================================================================
+  #
+  # This container runs the Node.js application.
+  #
+  # The application itself contains NO OpenTelemetry instrumentation code.
+  #
+  # The injector/runtime environment is responsible for enabling telemetry.
+  #
+  app:
+
+    # ------------------------------------------------------------------------
+    # Image
+    # ------------------------------------------------------------------------
+    #
+    # The Docker image used for the container.
+    #
+    # "node:20" is the official Node.js image from Docker Hub.
+    #
+    # Why Node 20?
+    #
+    # - modern LTS runtime
+    # - stable OpenTelemetry support
+    # - current ecosystem compatibility
+    #
+    image: node:20
+
+    # ------------------------------------------------------------------------
+    # Working Directory
+    # ------------------------------------------------------------------------
+    #
+    # Sets the default directory inside the container.
+    #
+    # All subsequent commands execute relative to this directory.
+    #
+    # "/app" is a common convention for application source code.
+    #
+    working_dir: /app
+
+    # ------------------------------------------------------------------------
+    # Volumes
+    # ------------------------------------------------------------------------
+    #
+    # Mounts files/directories from the host machine into the container.
+    #
+    # "./:/app" means:
+    #
+    #   current host directory  ->  /app inside container
+    #
+    # This allows the container to see:
+    #
+    # - app.js
+    # - package.json
+    # - other project files
+    #
+    # Why use a bind mount?
+    #
+    # - easier development
+    # - live editing
+    # - no image rebuild required
+    #
+    volumes:
+      - ./:/app
+
+    # ------------------------------------------------------------------------
+    # Command
+    # ------------------------------------------------------------------------
+    #
+    # The command executed when the container starts.
+    #
+    # Here we simply launch the Node.js application.
+    #
+    # In a real injector scenario, this command might instead:
+    #
+    # - preload instrumentation
+    # - use NODE_OPTIONS
+    # - wrap node execution
+    # - inject runtime hooks
+    #
+    command: node app.js
+
+    # ------------------------------------------------------------------------
+    # Ports
+    # ------------------------------------------------------------------------
+    #
+    # Exposes container ports to the host machine.
+    #
+    # Format:
+    #
+    #   HOST_PORT:CONTAINER_PORT
+    #
+    # "3000:3000" means:
+    #
+    #   localhost:3000 on your machine
+    #       maps to
+    #   port 3000 inside the container
+    #
+    # This allows you to access the app using:
+    #
+    #   curl http://localhost:3000
+    #
+    ports:
+      - "3000:3000"
+
+    # ------------------------------------------------------------------------
+    # Environment Variables
+    # ------------------------------------------------------------------------
+    #
+    # Environment variables configure the OpenTelemetry SDK/runtime.
+    #
+    # These are extremely important because they tell the instrumentation:
+    #
+    # - where to export telemetry
+    # - what service name to use
+    # - which protocol to use
+    #
+    environment:
+
+      # ----------------------------------------------------------------------
+      # OTEL_SERVICE_NAME
+      # ----------------------------------------------------------------------
+      #
+      # Defines the logical name of the service.
+      #
+      # This becomes:
+      #
+      #   service.name
+      #
+      # in telemetry resources.
+      #
+      # You saw this appear in Collector logs:
+      #
+      #   service.name: Str(otel-injector-demo)
+      #
+      # This is one of the most important telemetry attributes because it
+      # identifies WHICH service produced the spans.
+      #
+      OTEL_SERVICE_NAME: otel-injector-demo
+
+      # ----------------------------------------------------------------------
+      # OTEL_EXPORTER_OTLP_ENDPOINT
+      # ----------------------------------------------------------------------
+      #
+      # Defines where telemetry should be exported.
+      #
+      # "http://collector:4318"
+      #
+      # means:
+      #
+      # - use the container named "collector"
+      # - communicate on port 4318
+      #
+      # Why does "collector" work?
+      #
+      # Docker Compose automatically creates internal DNS entries for services.
+      #
+      # So:
+      #
+      #   collector
+      #
+      # resolves automatically to the collector container IP.
+      #
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+
+      # ----------------------------------------------------------------------
+      # OTEL_EXPORTER_OTLP_PROTOCOL
+      # ----------------------------------------------------------------------
+      #
+      # Defines the OTLP transport protocol.
+      #
+      # "http/protobuf" means:
+      #
+      # - use HTTP transport
+      # - encode telemetry using protobuf
+      #
+      # Why use this?
+      #
+      # - simpler networking
+      # - easier debugging
+      # - compatible with Collector OTLP/HTTP receiver
+      #
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+
+    # ------------------------------------------------------------------------
+    # Depends On
+    # ------------------------------------------------------------------------
+    #
+    # Tells Docker Compose to start the collector service before the app.
+    #
+    # This helps avoid startup race conditions.
+    #
+    # Otherwise the application might attempt to export telemetry before the
+    # Collector is ready to receive it.
+    #
+    depends_on:
+      - collector
+
+  # ==========================================================================
+  # Collector Service
+  # ==========================================================================
+  #
+  # This container runs the OpenTelemetry Collector.
+  #
   collector:
-    image: otel/opentelemetry-collector:latest
-    command: ["--config=/etc/otelcol/config.yaml"]
+
+    # ------------------------------------------------------------------------
+    # Collector Image
+    # ------------------------------------------------------------------------
+    #
+    # Official OpenTelemetry Collector Contrib distribution.
+    #
+    # "contrib" includes:
+    #
+    # - more receivers
+    # - more exporters
+    # - more processors
+    # - community extensions
+    #
+    # compared to the minimal core Collector.
+    #
+    image: otel/opentelemetry-collector-contrib:latest
+
+    # ------------------------------------------------------------------------
+    # Collector Command
+    # ------------------------------------------------------------------------
+    #
+    # Launches the Collector using a specific config file.
+    #
+    # "--config" points to our mounted YAML configuration.
+    #
+    command:
+      - "--config=/etc/otelcol/config.yaml"
+
+    # ------------------------------------------------------------------------
+    # Collector Volume Mount
+    # ------------------------------------------------------------------------
+    #
+    # Mounts the local collector config into the container.
+    #
+    # Left side:
+    #
+    #   ./collector-config.yaml
+    #
+    # Right side:
+    #
+    #   /etc/otelcol/config.yaml
+    #
+    # This allows the Collector to use our custom pipeline configuration.
+    #
     volumes:
       - ./collector-config.yaml:/etc/otelcol/config.yaml
+
+    # ------------------------------------------------------------------------
+    # Exposed Ports
+    # ------------------------------------------------------------------------
+    #
+    # Exposes OTLP ports to the host machine.
+    #
+    # 4317:
+    #   OTLP/gRPC
+    #
+    # 4318:
+    #   OTLP/HTTP
+    #
+    # These ports are useful for:
+    #
+    # - local debugging
+    # - testing with curl
+    # - external SDK connections
+    #
     ports:
       - "4317:4317"
       - "4318:4318"
-
-  app:
-    image: node:22-bookworm
-    working_dir: /app
-    volumes:
-      - ./:/app
-    environment:
-      OTEL_SERVICE_NAME: otel-injector-demo
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
-      OTEL_TRACES_EXPORTER: otlp
-      OTEL_METRICS_EXPORTER: none
-      OTEL_LOGS_EXPORTER: none
-      OTEL_INJECTOR_LOG_LEVEL: debug
-    command:
-      - sh
-      - -c
-      - |
-        apt-get update &&
-        apt-get install -y curl ca-certificates &&
-        curl -L -o /tmp/opentelemetry-injector.deb https://github.com/open-telemetry/opentelemetry-injector/releases/download/v0.8.0/opentelemetry-injector_0.8.0_amd64.deb &&
-        apt-get install -y /tmp/opentelemetry-injector.deb &&
-        LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so node app.js
-    ports:
-      - "3000:3000"
-    depends_on:
-      - collector

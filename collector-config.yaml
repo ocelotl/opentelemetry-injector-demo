@@ -1,17 +1,248 @@
+# ============================================================================
+# OpenTelemetry Collector Configuration
+# ============================================================================
+#
+# This file configures the OpenTelemetry Collector container.
+#
+# The Collector acts as a telemetry pipeline:
+#
+#   Application
+#        |
+#        v
+#   OTLP Receiver
+#        |
+#        v
+#   Processors
+#        |
+#        v
+#   Exporters
+#
+# In this demo:
+#
+#   Node.js app
+#        |
+#        v
+#   Collector receives spans using OTLP
+#        |
+#        v
+#   Collector prints spans to its own logs
+#
+# This allows us to verify that telemetry is flowing correctly without
+# requiring external observability backends like Jaeger, Tempo, or Datadog.
+#
+# ============================================================================
+
 receivers:
+
+  # ==========================================================================
+  # OTLP Receiver
+  # ==========================================================================
+  #
+  # A receiver defines HOW telemetry enters the Collector.
+  #
+  # "otlp" is the standard OpenTelemetry Protocol receiver.
+  #
+  # Most OpenTelemetry SDKs, auto-instrumentation agents, and collectors
+  # communicate using OTLP.
+  #
+  # Your injected Node.js application sends traces here.
+  #
   otlp:
+
     protocols:
+
+      # ----------------------------------------------------------------------
+      # OTLP over gRPC
+      # ----------------------------------------------------------------------
+      #
+      # gRPC is the primary transport protocol used by OpenTelemetry.
+      #
+      # Why use gRPC?
+      #
+      # - Efficient binary protocol
+      # - Streaming support
+      # - Widely supported by OpenTelemetry SDKs
+      # - Lower overhead than plain HTTP
+      #
+      # Port 4317 is the official default OTLP/gRPC port.
+      #
       grpc:
+
+        # "0.0.0.0" means:
+        #
+        #   Listen on ALL network interfaces inside the container.
+        #
+        # This is important in Docker because other containers need to connect
+        # to the Collector through the Docker network.
+        #
+        # If we used:
+        #
+        #   127.0.0.1
+        #
+        # only processes INSIDE the collector container itself could connect.
+        #
         endpoint: 0.0.0.0:4317
+
+      # ----------------------------------------------------------------------
+      # OTLP over HTTP
+      # ----------------------------------------------------------------------
+      #
+      # Some SDKs and tools use HTTP instead of gRPC.
+      #
+      # Supporting both protocols makes the Collector more flexible.
+      #
+      # OTLP/HTTP is often easier for:
+      #
+      # - Browser environments
+      # - Simpler integrations
+      # - Debugging with curl
+      #
+      # Port 4318 is the official default OTLP/HTTP port.
+      #
       http:
+
+        # Again:
+        #
+        # 0.0.0.0 means accept connections from outside the container.
+        #
         endpoint: 0.0.0.0:4318
 
+# ============================================================================
+# Processors
+# ============================================================================
+#
+# Processors modify telemetry BEFORE exporting it.
+#
+# They sit in the middle of the telemetry pipeline.
+#
+# Common processor tasks:
+#
+# - Batching
+# - Filtering
+# - Sampling
+# - Attribute modification
+# - Resource enrichment
+# - Memory limiting
+#
+processors:
+
+  # --------------------------------------------------------------------------
+  # Batch Processor
+  # --------------------------------------------------------------------------
+  #
+  # The batch processor groups telemetry together before export.
+  #
+  # Without batching:
+  #
+  #   Every span would be exported immediately.
+  #
+  # That would:
+  #
+  # - Increase CPU overhead
+  # - Increase network overhead
+  # - Reduce throughput
+  # - Make exporters less efficient
+  #
+  # Batching improves performance significantly in real systems.
+  #
+  # Even though this demo is tiny, batching is considered best practice.
+  #
+  batch:
+
+# ============================================================================
+# Exporters
+# ============================================================================
+#
+# Exporters define WHERE telemetry leaves the Collector.
+#
+# Examples of real exporters:
+#
+# - Jaeger
+# - Tempo
+# - Datadog
+# - Honeycomb
+# - Prometheus
+# - OTLP exporters to another backend
+#
 exporters:
+
+  # --------------------------------------------------------------------------
+  # Debug Exporter
+  # --------------------------------------------------------------------------
+  #
+  # The debug exporter prints telemetry directly to the Collector logs.
+  #
+  # This is EXTREMELY useful for learning and debugging because:
+  #
+  # - We can see spans immediately
+  # - No external backend is required
+  # - We can inspect raw telemetry structure
+  #
   debug:
+
+    # "verbosity" controls how much telemetry detail gets printed.
+    #
+    # Possible values:
+    #
+    # - basic
+    # - normal
+    # - detailed
+    #
+    # We use "detailed" because we want educational visibility into:
+    #
+    # - span names
+    # - attributes
+    # - resources
+    # - process metadata
+    # - service.name
+    # - timestamps
+    #
+    # This is why your collector logs showed fields like:
+    #
+    #   service.name
+    #   process.pid
+    #   process.command_args
+    #
     verbosity: detailed
 
+# ============================================================================
+# Service Section
+# ============================================================================
+#
+# The "service" section wires everything together.
+#
+# Think of this as the Collector's runtime topology definition.
+#
 service:
+
   pipelines:
+
+    # ------------------------------------------------------------------------
+    # Trace Pipeline
+    # ------------------------------------------------------------------------
+    #
+    # A pipeline defines the complete telemetry flow:
+    #
+    #   receivers -> processors -> exporters
+    #
+    # This pipeline specifically handles TRACES.
+    #
     traces:
+
+      # The trace pipeline receives telemetry from the OTLP receiver.
+      #
+      # "[otlp]" references the receiver defined earlier.
+      #
       receivers: [otlp]
+
+      # Before exporting, telemetry goes through the batch processor.
+      #
+      # "[batch]" references the processor defined earlier.
+      #
+      processors: [batch]
+
+      # Finally, spans are exported using the debug exporter.
+      #
+      # "[debug]" references the exporter defined earlier.
+      #
       exporters: [debug]
