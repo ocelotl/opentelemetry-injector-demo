@@ -73,7 +73,7 @@ services:
     # - stable OpenTelemetry support
     # - current ecosystem compatibility
     #
-    image: node:20
+    image: node:22-bookworm
 
     # ------------------------------------------------------------------------
     # Working Directory
@@ -127,8 +127,15 @@ services:
     # - wrap node execution
     # - inject runtime hooks
     #
-    command: node app.js
-
+    command:
+      - sh
+      - -c
+      - |
+        apt-get update &&
+        apt-get install -y curl ca-certificates &&
+        curl -L -o /tmp/opentelemetry-injector.deb https://github.com/open-telemetry/opentelemetry-injector/releases/download/v0.8.0/opentelemetry-injector_0.8.0_amd64.deb &&
+        apt-get install -y /tmp/opentelemetry-injector.deb &&
+        LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so node --trace-warnings app.js
     # ------------------------------------------------------------------------
     # Ports
     # ------------------------------------------------------------------------
