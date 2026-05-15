@@ -12,7 +12,21 @@ services:
         apt-get install -y curl ca-certificates &&
         curl -L -o /tmp/opentelemetry-injector.deb https://github.com/open-telemetry/opentelemetry-injector/releases/download/v0.8.0/opentelemetry-injector_0.8.0_amd64.deb &&
         apt-get install -y /tmp/opentelemetry-injector.deb &&
+
         pip install --no-cache-dir flask &&
+
+        mkdir -p /app/python-agent/glibc &&
+
+        pip install --no-cache-dir --target /app/python-agent/glibc \
+          opentelemetry-distro \
+          opentelemetry-exporter-otlp \
+          opentelemetry-instrumentation-flask &&
+
+        printf '%s\n' \
+          'from opentelemetry.instrumentation.auto_instrumentation import sitecustomize' \
+          'print("OTEL PYTHON AUTO-INSTRUMENTATION LOADED", flush=True)' \
+          > /app/python-agent/glibc/sitecustomize.py &&
+
         LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so python app.py
     ports:
       - "3000:3000"
@@ -24,6 +38,7 @@ services:
       OTEL_METRICS_EXPORTER: none
       OTEL_LOGS_EXPORTER: none
       OTEL_INJECTOR_LOG_LEVEL: debug
+      PYTHON_AUTO_INSTRUMENTATION_AGENT_PATH_PREFIX: /app/python-agent
     depends_on:
       - collector
 
