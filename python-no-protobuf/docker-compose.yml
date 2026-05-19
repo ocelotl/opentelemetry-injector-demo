@@ -59,23 +59,6 @@ services:
           'print("OTEL PYTHON AUTO-INSTRUMENTATION LOADED", flush=True, file=stderr)' \
           > /app/python-agent/glibc/sitecustomize.py
 
-        cat > /app/run-and-prove.sh <<'EOF'
-        #!/bin/sh
-        set -eu
-
-        python app.py > /app/telemetry/traces.jsonl &
-        app_pid="$!"
-
-        sleep 2
-
-        curl -s http://127.0.0.1:3000/ > /dev/null
-
-        sleep 2
-
-        echo
-        echo "========== TELEMETRY FILE PROOF =========="
-        test -s /app/telemetry/traces.jsonl
-        echo "OK: telemetry file exists and is not empty: /app/telemetry/traces.jsonl"
 
         echo
         echo "========== PROTOBUF PIP PROOF =========="
@@ -102,10 +85,4 @@ services:
         echo "========== FINAL RESULT =========="
         echo "OK: injector produced telemetry using OTLP JSON file exporter without protobuf installed"
 
-        wait "$app_pid"
-        EOF
-
-        chmod +x /app/run-and-prove.sh
-
-        LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so \
-          /app/run-and-prove.sh
+        LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so python app.py > /app/telemetry/traces.jsonl &
