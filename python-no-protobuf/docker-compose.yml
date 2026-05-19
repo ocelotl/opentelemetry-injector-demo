@@ -12,23 +12,10 @@ services:
 
     environment:
       OTEL_SERVICE_NAME: otel-injector-demo-python-no-collector
-
-      # Use the exporter added by the PR.
       OTEL_TRACES_EXPORTER: otlp_json_file
-
       OTEL_METRICS_EXPORTER: none
       OTEL_LOGS_EXPORTER: none
-
-      # Enable injector debug logs.
       OTEL_INJECTOR_LOG_LEVEL: debug
-
-      # Required by the injector for Python auto instrumentation.
-      #
-      # The injector appends:
-      #
-      #   <prefix>/glibc
-      #
-      # to PYTHONPATH automatically.
       PYTHON_AUTO_INSTRUMENTATION_AGENT_PATH_PREFIX: /app/python-agent
 
     command:
@@ -56,48 +43,69 @@ services:
           /app/python-agent/glibc \
           /app/telemetry
 
-        # Install Python auto instrumentation packages
-        # into the directory that the injector will append
-        # to PYTHONPATH.
         pip install --no-cache-dir \
           --target /app/python-agent/glibc \
           opentelemetry-distro \
           opentelemetry-instrumentation-flask
 
-        # Install the unreleased exporter packages from the PR
-        # into the NORMAL interpreter site-packages instead of
-        # using --target.
-        #
-        # Using --target with these namespace packages caused
-        # pip to install only the .dist-info metadata while
-        # failing to extract the actual:
-        #
-        #   opentelemetry/exporter/*
-        #
-        # package tree.
-        #
-        # Installing into the normal interpreter site-packages
-        # avoids the namespace package issue.
         pip install --no-cache-dir \
           "git+https://github.com/herin049/opentelemetry-python.git@feat/file-exporter#subdirectory=opentelemetry-proto-json" \
           "git+https://github.com/herin049/opentelemetry-python.git@feat/file-exporter#subdirectory=exporter/opentelemetry-exporter-otlp-json-common" \
           "git+https://github.com/herin049/opentelemetry-python.git@feat/file-exporter#subdirectory=exporter/opentelemetry-exporter-otlp-json-file"
 
-        # Prove that the injector loaded Python
-        # auto instrumentation.
         printf '%s\n' \
           'from sys import stderr' \
           'from opentelemetry.instrumentation.auto_instrumentation import sitecustomize' \
           'print("OTEL PYTHON AUTO-INSTRUMENTATION LOADED", flush=True, file=stderr)' \
           > /app/python-agent/glibc/sitecustomize.py
 
-        # The exporter writes OTLP JSON to stdout.
-        #
-        # Redirect stdout to a file so that we can inspect
-        # telemetry locally without a collector.
-        #
-        # Application logs go to stderr so they do not pollute
-        # the JSONL telemetry output.
+        cat > /app/run-and-prove.sh <<'EOF'
+        #!/bin/sh
+        set -eu
+
+        python app.py > /app/telemetry/traces.jsonl &
+        app_pid="$!"
+
+        sleep 2
+
+        curl -s http://127.0.0.1:3000/ > /dev/null
+
+        sleep 2
+
+        echo
+        echo "========== TELEMETRY FILE PROOF =========="
+        test -s /app/telemetry/traces.jsonl
+        echo "OK: telemetry file exists and is not empty: /app/telemetry/traces.jsonl"
+
+        echo
+        echo "========== PROTOBUF PIP PROOF =========="
+        if pip show protobuf > /dev/null 2>&1; then
+          echo "FAIL: protobuf is installed according to pip"
+          pip show protobuf
+          kill "$app_pid"
+          exit 1
+        else
+          echo "OK: pip show protobuf failed, so protobuf is not installed as a Python package"
+        fi
+
+        echo
+        echo "========== PROTOBUF IMPORT PROOF =========="
+        if python -c 'import google.protobuf' > /dev/null 2>&1; then
+          echo "FAIL: python can import google.protobuf"
+          kill "$app_pid"
+          exit 1
+        else
+          echo "OK: python cannot import google.protobuf"
+        fi
+
+        echo
+        echo "========== FINAL RESULT =========="
+        echo "OK: injector produced telemetry using OTLP JSON file exporter without protobuf installed"
+
+        wait "$app_pid"
+        EOF
+
+        chmod +x /app/run-and-prove.sh
+
         LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so \
-          python app.py \
-          > /app/telemetry/traces.jsonl
+          /app/run-and-prove.sh
