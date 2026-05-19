@@ -1,43 +1,103 @@
 services:
   app:
     image: python:3.12-bookworm
+
     working_dir: /app
+
     volumes:
       - ./:/app
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      OTEL_SERVICE_NAME: otel-injector-demo-python-no-collector
+
+      # Use the exporter added by the PR.
+      OTEL_TRACES_EXPORTER: otlp_json_file
+
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+
+      # Enable injector debug logs.
+      OTEL_INJECTOR_LOG_LEVEL: debug
+
+      # Required by the injector for Python auto instrumentation.
+      #
+      # The injector appends:
+      #
+      #   <prefix>/glibc
+      #
+      # to PYTHONPATH automatically.
+      PYTHON_AUTO_INSTRUMENTATION_AGENT_PATH_PREFIX: /app/python-agent
+
     command:
       - sh
       - -c
       - |
-        apt-get update &&
-        apt-get install -y curl ca-certificates git &&
-        curl -L -o /tmp/opentelemetry-injector.deb https://github.com/open-telemetry/opentelemetry-injector/releases/download/v0.8.0/opentelemetry-injector_0.8.0_amd64.deb &&
-        apt-get install -y /tmp/opentelemetry-injector.deb &&
+        set -eux
 
-        pip install --no-cache-dir flask &&
+        apt-get update
 
-        mkdir -p /app/python-agent/glibc /app/telemetry &&
+        apt-get install -y \
+          curl \
+          ca-certificates \
+          git
 
-        pip install --no-cache-dir --target /app/python-agent/glibc \
+        curl -L \
+          -o /tmp/opentelemetry-injector.deb \
+          https://github.com/open-telemetry/opentelemetry-injector/releases/download/v0.8.0/opentelemetry-injector_0.8.0_amd64.deb
+
+        apt-get install -y /tmp/opentelemetry-injector.deb
+
+        pip install --no-cache-dir flask
+
+        mkdir -p \
+          /app/python-agent/glibc \
+          /app/telemetry
+
+        # Install Python auto instrumentation packages
+        # into the directory that the injector will append
+        # to PYTHONPATH.
+        pip install --no-cache-dir \
+          --target /app/python-agent/glibc \
           opentelemetry-distro \
-          opentelemetry-instrumentation-flask &&
+          opentelemetry-instrumentation-flask
 
-        pip install --no-cache-dir --target /app/python-agent/glibc --no-deps \
+        # Install the unreleased exporter packages from the PR
+        # into the NORMAL interpreter site-packages instead of
+        # using --target.
+        #
+        # Using --target with these namespace packages caused
+        # pip to install only the .dist-info metadata while
+        # failing to extract the actual:
+        #
+        #   opentelemetry/exporter/*
+        #
+        # package tree.
+        #
+        # Installing into the normal interpreter site-packages
+        # avoids the namespace package issue.
+        pip install --no-cache-dir \
+          "git+https://github.com/herin049/opentelemetry-python.git@feat/file-exporter#subdirectory=opentelemetry-proto-json" \
           "git+https://github.com/herin049/opentelemetry-python.git@feat/file-exporter#subdirectory=exporter/opentelemetry-exporter-otlp-json-common" \
-          "git+https://github.com/herin049/opentelemetry-python.git@feat/file-exporter#subdirectory=exporter/opentelemetry-exporter-otlp-json-file" &&
+          "git+https://github.com/herin049/opentelemetry-python.git@feat/file-exporter#subdirectory=exporter/opentelemetry-exporter-otlp-json-file"
 
+        # Prove that the injector loaded Python
+        # auto instrumentation.
         printf '%s\n' \
           'from sys import stderr' \
           'from opentelemetry.instrumentation.auto_instrumentation import sitecustomize' \
           'print("OTEL PYTHON AUTO-INSTRUMENTATION LOADED", flush=True, file=stderr)' \
-          > /app/python-agent/glibc/sitecustomize.py &&
+          > /app/python-agent/glibc/sitecustomize.py
 
-        LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so python app.py > /app/telemetry/traces.jsonl
-    ports:
-      - "3000:3000"
-    environment:
-      OTEL_SERVICE_NAME: otel-injector-demo-python-no-collector
-      OTEL_TRACES_EXPORTER: otlp_json_file
-      OTEL_METRICS_EXPORTER: none
-      OTEL_LOGS_EXPORTER: none
-      OTEL_INJECTOR_LOG_LEVEL: debug
-      PYTHON_AUTO_INSTRUMENTATION_AGENT_PATH_PREFIX: /app/python-agent
+        # The exporter writes OTLP JSON to stdout.
+        #
+        # Redirect stdout to a file so that we can inspect
+        # telemetry locally without a collector.
+        #
+        # Application logs go to stderr so they do not pollute
+        # the JSONL telemetry output.
+        LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so \
+          python app.py \
+          > /app/telemetry/traces.jsonl
