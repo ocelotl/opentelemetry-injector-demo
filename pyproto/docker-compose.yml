@@ -1,0 +1,64 @@
+services:
+
+  # ---------------------------------------------------------------------------
+  # Prepares the python-agent directory.
+  #
+  # Installs OTel API/SDK + instrumentation libraries, then installs the
+  # pure-Python pyproto exporter stack from local source (no google.protobuf),
+  # and copies sitecustomize.py into the agent directory.
+  #
+  # The app container will have /python-agent on its PYTHONPATH, so everything
+  # placed here is importable — including sitecustomize.py, which Python loads
+  # automatically before any user code.
+  #
+  # Local source mounts allow iterating on exporter code without pushing to
+  # GitHub first. When ready, replace with:
+  #   pip install "opentelemetry-pyproto @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=opentelemetry-pyproto"
+  # ---------------------------------------------------------------------------
+  prepare-python-agent:
+    image: python:3.13-slim
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - ./python-agent:/python-agent
+      - /home/tigre/github/ocelotl/python-protobuf:/python-protobuf:ro
+      - /home/tigre/github/ocelotl/opentelemetry/opentelemetry-python:/opentelemetry-python:ro
+    command: >
+      sh -lc "
+        rm -rf /python-agent/* &&
+        pip install --no-cache-dir --target /python-agent
+          opentelemetry-api
+          opentelemetry-sdk
+          opentelemetry-instrumentation-requests
+          opentelemetry-instrumentation-logging
+          requests &&
+        pip install --no-cache-dir --target /python-agent
+          /python-protobuf
+          /opentelemetry-python/opentelemetry-pyproto
+          /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-common
+          /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-http &&
+        cp /workspace/sitecustomize.py /python-agent/sitecustomize.py &&
+        echo 'prepare-python-agent: done'
+      "
+
+  app:
+    image: python:3.13-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+      - ./python-agent:/python-agent
+    environment:
+      PYTHONPATH: /python-agent
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+    command: python app.py
+    depends_on:
+      prepare-python-agent:
+        condition: service_completed_successfully
+      collector:
+        condition: service_started
+
+  collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol/collector-config.yaml"]
+    volumes:
+      - ./collector-config.yaml:/etc/otelcol/collector-config.yaml
