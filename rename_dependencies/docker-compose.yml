@@ -1,6 +1,0 @@
-services:
-  app:
-    build: .
-    environment:
-      PYTHONPATH: /app/python-agent/glibc
-    command: python /app/app.py
