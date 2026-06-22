@@ -1,585 +1,129 @@
-====================
-OTel Injector Demo
-====================
+==========================
+OpenTelemetry Injector Demo
+==========================
 
-Overview
-========
+This repository demonstrates that the ``opentelemetry-exporter-otlp-pyproto``
+exporter stack — a pure-Python protobuf implementation with **no**
+``google.protobuf`` dependency — produces telemetry that is semantically
+identical to the standard ``opentelemetry-exporter-otlp-proto`` exporter.
 
-This project demonstrates minimal OpenTelemetry auto-instrumentation setups
-using an OpenTelemetry Collector and sample applications in multiple
-languages.
+Two self-contained scenarios run the same application, the same collector
+configuration, and the same injection mechanism. The only difference is the
+exporter package.
 
-The purpose of this demo is to prove that telemetry can be injected into
-applications automatically and exported successfully without modifying the
-application code itself.
+Scenarios
+=========
 
-The telemetry flow looks like this:
+``pyprotobuf/``
+   Uses ``opentelemetry-exporter-otlp-pyproto-http``, installed from the local
+   ``opentelemetry-python`` checkout.  No ``google.protobuf`` in the dependency
+   tree.
 
-::
+``protobuf/``
+   Uses ``opentelemetry-exporter-otlp-proto-http``, installed from PyPI.
+   Pulls in ``protobuf`` and ``googleapis-common-protos`` as usual.
 
-    +-------------------+
-    | Application       |
-    | (HTTP server)     |
-    +-------------------+
-              |
-              | OpenTelemetry spans
-              v
-    +-------------------+
-    | OTel Injector     |
-    | Auto-Instrument.  |
-    +-------------------+
-              |
-              | OTLP
-              v
-    +-------------------+
-    | OTel Collector    |
-    +-------------------+
-              |
-              | Debug Exporter
-              v
-    +-------------------+
-    | Collector Logs    |
-    +-------------------+
+Both scenarios exercise the same telemetry features:
 
-This demo proves that:
+- **Traces** — parent/child spans (Internal + Client kinds), span events
+  (``request.started``, ``request.done``), span status OK and ERROR,
+  ``span.record_exception`` with full stacktrace, attributes of all value
+  types (string, int, bool, float, array).
+- **Metrics** — monotonic counter (``Sum``), up-down counter (``Sum``,
+  non-monotonic), manual histogram, observable gauge, plus the
+  auto-instrumented ``http.client.duration`` histogram.
+- **Logs** — log records with ``SeverityText``, ``Body``, and trace
+  correlation (``trace_id`` / ``span_id`` embedded).
 
-- Applications are being instrumented successfully
-- Traces are being generated automatically
-- Telemetry reaches the Collector
-- The Collector processes telemetry correctly
-- Exporters can emit the telemetry successfully
-
-No tracing logic exists in the application source code.
-
-The telemetry is injected externally.
-
-Available Implementations
-=========================
-
-This repository contains working examples in multiple languages:
-
-Node.js Implementation
-----------------------
-
-Located in the ``node/`` directory.
-
-Demonstrates auto-instrumentation of a Node.js HTTP server.
-
-Python Implementation
----------------------
-
-Located in the ``python/`` directory.
-
-Demonstrates auto-instrumentation of a Flask application.
-
-Both implementations follow the same architecture and prove the same
-concepts.
-
-Project Structure
-=================
-
-The repository is organized by language:
-
-::
-
-    .
-    ├── README.rst
-    ├── node/
-    │   ├── app.js
-    │   ├── package.json
-    │   ├── docker-compose.yml
-    │   └── collector-config.yaml
-    └── python/
-        ├── app.py
-        ├── docker-compose.yml
-        ├── collector-config.yaml
-        └── .gitignore
-
-Each language directory contains:
-
-- Application source code
-- Docker Compose configuration
-- OpenTelemetry Collector configuration
-
-Component Breakdown
+Injection mechanism
 ===================
 
-Application Files
-=================
+Both scenarios use the PYTHONPATH + ``sitecustomize.py`` approach:
 
-Node.js: app.js
----------------
+1. A ``prepare-python-agent`` Docker service installs all packages into
+   ``./python-agent/``.
+2. The app container mounts that directory and sets it on ``PYTHONPATH``.
+3. Python automatically executes ``sitecustomize.py`` before any user code,
+   which wires up the SDK and exporters.
 
-A minimal Node.js HTTP server using the built-in ``http`` module.
+The application source code (``app.py``) contains no OpenTelemetry imports.
 
-Source:
-
-::
-
-    const http = require("http");
-
-    const server = http.createServer((req, res) => {
-      console.log("received request");
-
-      res.end("hello from otel injector\\n");
-    });
-
-    server.listen(3000, () => {
-      console.log("listening on port 3000");
-    });
-
-Python: app.py
---------------
-
-A minimal Flask HTTP server.
-
-Source:
-
-::
-
-    from flask import Flask
-
-    app = Flask(__name__)
-
-
-    @app.route("/", defaults={"path": ""})
-    @app.route("/<path:path>")
-    def hello(path: str) -> tuple[str, int, dict[str, str]]:
-        print("received request", flush=True)
-        return "hello from otel injector\\n", 200, {
-            "Content-Type": "text/plain; charset=utf-8"
-        }
-
-
-    if __name__ == "__main__":
-        print("listening on port 3000", flush=True)
-        app.run(host="0.0.0.0", port=3000)
-
-What these applications do
----------------------------
-
-- Create simple HTTP servers
-- Listen on port 3000
-- Print messages when requests arrive
-- Return plain text responses
-
-Important observation
----------------------
-
-Both applications contain:
-
-- No OpenTelemetry SDK imports
-- No tracing code
-- No span creation
-- No telemetry logic
-
-This is critical.
-
-If traces appear later in the Collector logs, then the instrumentation was
-added externally by the injector.
-
-That is the entire point of this demo.
-
-collector-config.yaml
-=====================
-
-This file configures the OpenTelemetry Collector.
-
-The Collector acts as a telemetry router.
-
-Telemetry flow inside the Collector:
-
-::
-
-    receivers -> processors -> exporters
-
-Receivers
----------
-
-The Collector receives telemetry using OTLP.
-
-Supported protocols:
-
-- OTLP/gRPC on port 4317
-- OTLP/HTTP on port 4318
-
-Processors
-----------
-
-The batch processor groups spans together before export.
-
-This improves efficiency and reflects production best practices.
-
-Exporters
----------
-
-The debug exporter prints telemetry directly to Collector logs.
-
-This is ideal for educational purposes because we can inspect the raw spans.
-
-docker-compose.yml
-==================
-
-Docker Compose orchestrates the containers involved in the demo.
-
-Typical architecture:
-
-::
-
-    +---------------------+
-    | app container       |
-    +---------------------+
-
-    +---------------------+
-    | collector container |
-    +---------------------+
-
-Docker networking allows the application container to send telemetry to the
-Collector container.
-
-Why Containers Matter
-=====================
-
-Containers provide:
-
-- Process isolation
-- Reproducibility
-- Stable networking
-- Portable environments
-
-This makes the demo deterministic and easy to reproduce.
-
-OpenTelemetry Concepts
-======================
-
-What is OpenTelemetry?
-======================
-
-OpenTelemetry is a standard for observability telemetry.
-
-It provides:
-
-- Traces
-- Metrics
-- Logs
-- Context propagation
-- Instrumentation libraries
-
-What is a Trace?
-================
-
-A trace represents the lifecycle of a request or operation.
-
-Example:
-
-::
-
-    Incoming HTTP Request
-        |
-        +-- Database Query
-        |
-        +-- API Call
-        |
-        +-- Cache Access
-
-Each operation inside a trace is represented by a span.
-
-What is a Span?
-===============
-
-A span is a timed operation.
-
-A span contains:
-
-- Start time
-- End time
-- Attributes
-- Events
-- Parent-child relationships
-
-Example:
-
-::
-
-    Span: HTTP GET /users
-
-Attributes might include:
-
-::
-
-    http.method = GET
-    http.route = /users
-    http.status_code = 200
-
-What is Auto-Instrumentation?
-=============================
-
-Auto-instrumentation means telemetry is added automatically without modifying
-application code.
-
-Normally developers would manually write code like:
-
-::
-
-    const span = tracer.startSpan("operation");
-
-Auto-instrumentation avoids that.
-
-Instead:
-
-- A runtime hook
-- Monkey patching
-- eBPF
-- Loader injection
-- Environment configuration
-
-automatically instruments frameworks and libraries.
-
-In these demos, the injector instruments the HTTP servers automatically.
-
-Why This Demo Matters
-=====================
-
-This project demonstrates something extremely important:
-
-The applications themselves have NO telemetry code.
-
-Yet spans still appear.
-
-That proves:
-
-- Instrumentation was injected externally
-- The injector works
-- OpenTelemetry hooks are functioning
-- Telemetry export is functioning
-
-This is the core value proposition of instrumentation injectors.
-
-How the Demo Works Internally
-=============================
-
-Step 1
-======
-
-The application starts.
-
-It only creates an HTTP server.
-
-No telemetry exists yet.
-
-Step 2
-======
-
-The injector modifies runtime behavior.
-
-This usually happens through:
-
-- preload hooks
-- runtime patching
-- environment variables
-- wrapper processes
-- injected SDK initialization
-
-The injector activates OpenTelemetry instrumentation.
-
-Step 3
-======
-
-The HTTP library becomes instrumented automatically.
-
-When requests arrive:
-
-- spans are created
-- context is propagated
-- metadata is attached
-
-Step 4
-======
-
-Telemetry is exported using OTLP.
-
-The app sends spans to the Collector.
-
-Step 5
-======
-
-The Collector receives telemetry.
-
-The Collector then:
-
-- batches spans
-- processes spans
-- exports spans
-
-Step 6
-======
-
-The debug exporter prints the spans.
-
-Example output:
-
-::
-
-    Resource attributes:
-         -> service.name: Str(otel-injector-demo)
-
-This proves the telemetry pipeline is functioning correctly.
-
-How to Run
-===========
-
-Choose an implementation directory:
-
-Node.js:
-
-::
-
-    cd node
-
-Python:
-
-::
-
-    cd python
-
-Start the containers:
-
-::
-
-    docker compose up
-
-You should see logs indicating:
-
-::
-
-    listening on port 3000
-
-and:
-
-::
-
-    Everything is ready
-
-Generate traffic
-================
-
-Send a request to the application:
-
-::
-
-    curl http://localhost:3000
-
-Expected response:
-
-::
-
-    hello from otel injector
-
-Observe Collector Logs
-======================
-
-The Collector should print spans similar to:
-
-::
-
-    Traces
-    ResourceSpans #0
-
-    -> service.name: Str(otel-injector-demo-*)
-
-This is the key proof.
-
-Why This Output Matters
-=======================
-
-The applications never created spans manually.
-
-Yet the Collector received spans.
-
-Therefore:
-
-- auto-instrumentation succeeded
-- telemetry injection succeeded
-- export succeeded
-
-This demonstrates a working instrumentation pipeline.
-
-What the Collector Output Shows
-================================
-
-service.name
-------------
-
-::
-
-    service.name: Str(otel-injector-demo-node)
-
-or:
-
-::
-
-    service.name: Str(otel-injector-demo-python)
-
-This identifies the service producing telemetry.
-
-process.pid
------------
-
-::
-
-    process.pid: Int(...)
-
-The process ID of the instrumented application.
-
-process.command_args
---------------------
-
-Shows the command used to launch the process.
-
-This proves the runtime process itself was instrumented.
-
-Span Data
----------
-
-The spans themselves prove that:
-
-- HTTP requests were intercepted
-- timing information was collected
-- instrumentation hooks executed correctly
-
-How Real Systems Extend This
-============================
-
-Real production systems usually replace the debug exporter with:
-
-- Jaeger
-- Tempo
-- Datadog
-- Honeycomb
-- New Relic
-- Grafana Cloud
-
-Additional processors are often added:
-
-- sampling
-- attribute filtering
-- Kubernetes enrichment
-- tail sampling
-- memory limiting
-
-The same architecture scales to large distributed systems.
-
-Key Takeaways
+Prerequisites
 =============
 
-This demo proves that:
+- Docker with the Compose plugin (``docker compose``)
+- The ``opentelemetry-python`` repository checked out locally at the path
+  referenced in ``pyprotobuf/docker-compose.yml`` (required by the
+  ``pyprotobuf`` scenario only; ``protobuf`` installs entirely from PyPI)
 
-- Applications can be instrumented externally
-- Telemetry can be collected automatically
-- OpenTelemetry Collector pipelines work
-- OTLP transport works
-- The injector successfully activates instrumentation
-- No application tracing code is required
-- The same approach works across multiple languages
+Running the pyprotobuf scenario
+================================
 
-This is the foundation of modern observability platforms.
+::
+
+    cd pyprotobuf
+    docker compose up
+
+Expected collector output::
+
+    Traces   resource spans: ...  spans per batch: ...
+    Span #N  Name: process_request  Kind: Internal  Status code: Ok
+    Span #N  Name: GET              Kind: Client    Status code: Unset
+
+    Logs     log records: ...
+    Body: Str(request completed)  SeverityText: INFO
+
+    Metrics  metrics: 5
+    Name: app.requests          DataType: Sum  IsMonotonic: true
+    Name: app.active_requests   DataType: Sum  IsMonotonic: false
+    Name: app.request_duration  DataType: Histogram
+    Name: app.memory_usage      DataType: Gauge
+    Name: http.client.duration  DataType: Histogram
+
+Request index 9 targets an unreachable address intentionally, producing an
+ERROR span with an ``exception`` event and full stacktrace.
+
+Running the protobuf scenario
+==============================
+
+::
+
+    cd protobuf
+    docker compose up
+
+The collector output is structurally identical to the ``pyprotobuf`` scenario.
+The only differences are ``service.name: Str(protobuf-demo)`` vs
+``Str(pyprotobuf-demo)`` and the agent startup message in the app container
+logs.
+
+Running both simultaneously
+============================
+
+Each scenario uses its own Docker network (named after the directory), so they
+can run at the same time without port conflicts::
+
+    docker compose -f pyprotobuf/docker-compose.yml up &
+    docker compose -f protobuf/docker-compose.yml up &
+
+Dependencies installed
+======================
+
+``pyprotobuf`` scenario (no ``google.protobuf``)::
+
+    opentelemetry-api
+    opentelemetry-sdk
+    opentelemetry-pyproto              (pure-Python protobuf messages)
+    opentelemetry-exporter-otlp-pyproto-common
+    opentelemetry-exporter-otlp-pyproto-http
+    opentelemetry-instrumentation-requests
+    opentelemetry-instrumentation-logging
+    requests
+
+``protobuf`` scenario::
+
+    opentelemetry-api
+    opentelemetry-sdk
+    opentelemetry-exporter-otlp-proto-http  (+ protobuf, googleapis-common-protos)
+    opentelemetry-instrumentation-requests
+    opentelemetry-instrumentation-logging
+    requests
