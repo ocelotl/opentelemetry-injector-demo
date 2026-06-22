@@ -25,8 +25,7 @@ services:
     command: >
       sh -lc "
         rm -rf /python-agent/* &&
-        pip install --no-cache-dir --target /python-agent opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-requests opentelemetry-instrumentation-logging requests &&
-        pip install --no-cache-dir --target /python-agent /opentelemetry-python/opentelemetry-pyproto /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-common /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-http &&
+        pip install --no-cache-dir --target /python-agent opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-requests opentelemetry-instrumentation-logging requests /opentelemetry-python/opentelemetry-pyproto /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-common /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-http &&
         cp /workspace/sitecustomize.py /python-agent/sitecustomize.py &&
         echo 'prepare-python-agent: done'
       "
