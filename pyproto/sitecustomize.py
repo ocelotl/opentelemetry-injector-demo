@@ -1,8 +1,7 @@
 """OTel bootstrap injected via PYTHONPATH / sitecustomize.py mechanism.
 
 Configures the OpenTelemetry SDK with the pyproto OTLP exporter — a
-pure-Python protobuf encoder backed by python-protobuf, with NO dependency
-on google.protobuf.
+pure-Python protobuf encoder with NO dependency on google.protobuf.
 """
 
 from opentelemetry import metrics, trace

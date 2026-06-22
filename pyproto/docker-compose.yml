@@ -21,7 +21,6 @@ services:
     volumes:
       - .:/workspace
       - ./python-agent:/python-agent
-      - /home/tigre/github/ocelotl/python-protobuf:/python-protobuf:ro
       - /home/tigre/github/ocelotl/opentelemetry/opentelemetry-python:/opentelemetry-python:ro
     command: >
       sh -lc "
@@ -33,7 +32,6 @@ services:
           opentelemetry-instrumentation-logging
           requests &&
         pip install --no-cache-dir --target /python-agent
-          /python-protobuf
           /opentelemetry-python/opentelemetry-pyproto
           /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-common
           /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-http &&
