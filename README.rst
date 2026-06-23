@@ -2,22 +2,106 @@
 OpenTelemetry Injector Demo
 ==========================
 
-This repository demonstrates that the ``opentelemetry-exporter-otlp-pyproto``
-exporter stack — a pure-Python protobuf implementation with **no**
-``google.protobuf`` dependency — produces telemetry that is semantically
-identical to the standard ``opentelemetry-exporter-otlp-proto`` exporter.
+This repository proves that ``opentelemetry-exporter-otlp-pyproto`` — a
+pure-Python protobuf implementation with **no** ``google.protobuf`` dependency
+— produces telemetry that is semantically identical to the standard
+``opentelemetry-exporter-otlp-proto`` exporter.
 
-Two self-contained scenarios run the same application, the same collector
-configuration, and the same injection mechanism. The only difference is the
-exporter package.
+Two self-contained Docker Compose scenarios run the same application with the
+same OTel Collector configuration and the same injection mechanism.  The only
+difference between them is the exporter package.  A comparison script runs
+both, captures their OTLP output as JSON files, normalises away run-to-run
+variation (timestamps, trace IDs, network latency), and diffs the results.
+
+Prerequisites
+=============
+
+- Docker with the Compose plugin v2.7+ (``docker compose``)
+- ``jq``
+
+No other local tooling or repository checkouts are required.  All Python
+packages are installed inside Docker containers at runtime.
+
+Quick start: running the comparison
+=====================================
+
+::
+
+    bash compare.sh
+
+The script:
+
+1. Deletes any previous output in ``compare-output/``.
+2. Runs the ``pyprotobuf`` scenario end-to-end: installs packages, starts the
+   app, waits for it to finish, stops all containers.
+3. Runs the ``protobuf`` scenario the same way.
+4. Normalises both scenarios' OTLP JSON output (see *What is compared* below).
+5. Diffs the normalised output signal by signal and reports the result.
+
+Expected output when both exporters are equivalent::
+
+    === Setup ===
+
+    === Running pyprotobuf ===
+    ...
+    pyprotobuf: done
+
+    === Running protobuf ===
+    ...
+    protobuf: done
+
+    === Comparing outputs ===
+      OK       traces
+      OK       metrics
+      OK       logs
+
+    All signals match — pyprotobuf and protobuf produce equivalent telemetry.
+
+If any signal differs, ``compare.sh`` exits with status 1 and prints a unified
+diff showing exactly which normalised fields do not match.
+
+The first run takes several minutes because Docker pulls images and the
+``pyprotobuf`` scenario clones ``opentelemetry-python`` from GitHub to install
+the pyproto packages.  Subsequent runs reuse Docker layer cache and complete
+much faster.
+
+What is compared
+================
+
+The OTel Collector writes raw OTLP/JSON to ``compare-output/<scenario>/``
+(one file per signal: ``traces.json``, ``metrics.json``, ``logs.json``).
+Before diffing, ``compare.sh`` normalises each file to remove legitimate
+run-to-run variation:
+
+**Traces** — flattened to a list of spans; compared on: span name, kind,
+status code and message, attribute key/value pairs, event names and their
+attributes.  Stripped: trace/span IDs, timestamps, ``duration_ms`` (real
+network latency).  Exception stacktraces are compared after replacing the
+scenario-specific working-directory path with a placeholder.
+
+**Metrics** — flattened to a list of metric descriptors; compared on:
+
+- ``app.requests`` (Counter): value (always 9 — one per successful request)
+- ``app.active_requests`` (UpDownCounter): value (always 0 — balanced +1/−1)
+- ``app.memory_usage`` (Gauge): value (always 42.5 — fixed synthetic callback)
+- ``app.request_size`` (Histogram): full data — count, sum, min, max, bucket
+  counts (fixed synthetic values: 512 By per success, 64 By per error)
+- ``app.request_duration`` (Histogram): observation count only (real latency
+  values stripped)
+- ``http.client.duration`` (Histogram): observation count only (real latency
+  values stripped)
+
+**Logs** — flattened to a list of records across all OTLP batches; compared
+on: severity number/text, body, attribute key/value pairs.  Stripped: trace
+correlation attributes (``otelSpanID``, ``otelTraceID``, ``otelTraceSampled``).
 
 Scenarios
 =========
 
 ``pyprotobuf/``
-   Uses ``opentelemetry-exporter-otlp-pyproto-http``, installed from the local
-   ``opentelemetry-python`` checkout.  No ``google.protobuf`` in the dependency
-   tree.
+   Uses ``opentelemetry-exporter-otlp-pyproto-http``, installed from the
+   ``pyproto`` branch of https://github.com/ocelotl/opentelemetry-python.
+   No ``google.protobuf`` anywhere in the dependency tree.
 
 ``protobuf/``
    Uses ``opentelemetry-exporter-otlp-proto-http``, installed from PyPI.
@@ -30,8 +114,8 @@ Both scenarios exercise the same telemetry features:
   ``span.record_exception`` with full stacktrace, attributes of all value
   types (string, int, bool, float, array).
 - **Metrics** — monotonic counter (``Sum``), up-down counter (``Sum``,
-  non-monotonic), manual histogram, observable gauge, plus the
-  auto-instrumented ``http.client.duration`` histogram.
+  non-monotonic), manual histogram, observable gauge, synthetic fixed-value
+  histogram, plus the auto-instrumented ``http.client.duration`` histogram.
 - **Logs** — log records with ``SeverityText``, ``Body``, and trace
   correlation (``trace_id`` / ``span_id`` embedded).
 
@@ -48,62 +132,22 @@ Both scenarios use the PYTHONPATH + ``sitecustomize.py`` approach:
 
 The application source code (``app.py``) contains no OpenTelemetry imports.
 
-Prerequisites
-=============
+Running a single scenario manually
+====================================
 
-- Docker with the Compose plugin (``docker compose``)
-- The ``opentelemetry-python`` repository checked out locally at the path
-  referenced in ``pyprotobuf/docker-compose.yml`` (required by the
-  ``pyprotobuf`` scenario only; ``protobuf`` installs entirely from PyPI)
+Each scenario is self-contained.  From the repository root::
 
-Running the pyprotobuf scenario
-================================
+    cd pyprotobuf && docker compose up
 
-::
+or::
 
-    cd pyprotobuf
-    docker compose up
+    cd protobuf && docker compose up
 
-Expected collector output::
-
-    Traces   resource spans: ...  spans per batch: ...
-    Span #N  Name: process_request  Kind: Internal  Status code: Ok
-    Span #N  Name: GET              Kind: Client    Status code: Unset
-
-    Logs     log records: ...
-    Body: Str(request completed)  SeverityText: INFO
-
-    Metrics  metrics: 5
-    Name: app.requests          DataType: Sum  IsMonotonic: true
-    Name: app.active_requests   DataType: Sum  IsMonotonic: false
-    Name: app.request_duration  DataType: Histogram
-    Name: app.memory_usage      DataType: Gauge
-    Name: http.client.duration  DataType: Histogram
-
-Request index 9 targets an unreachable address intentionally, producing an
-ERROR span with an ``exception`` event and full stacktrace.
-
-Running the protobuf scenario
-==============================
-
-::
-
-    cd protobuf
-    docker compose up
-
-The collector output is structurally identical to the ``pyprotobuf`` scenario.
-The only differences are ``service.name: Str(protobuf-demo)`` vs
-``Str(pyprotobuf-demo)`` and the agent startup message in the app container
-logs.
-
-Running both simultaneously
-============================
-
-Each scenario uses its own Docker network (named after the directory), so they
-can run at the same time without port conflicts::
-
-    docker compose -f pyprotobuf/docker-compose.yml up &
-    docker compose -f protobuf/docker-compose.yml up &
+The OTel Collector's debug exporter prints all received spans, metrics, and
+log records to stdout.  Request index 9 targets an unreachable address
+intentionally, producing an ERROR span with an ``exception`` event and full
+stacktrace.  The two scenarios use separate Docker networks and can run
+simultaneously without port conflicts.
 
 Dependencies installed
 ======================
