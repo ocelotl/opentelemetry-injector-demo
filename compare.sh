@@ -5,6 +5,11 @@
 # Requirements: Docker with Compose plugin v2.7+, jq
 set -euo pipefail
 
+# Export UID/GID so docker-compose can run prepare-python-agent as the host user.
+# (Bash defines UID as a read-only variable; it must be explicitly exported.)
+export UID="$(id -u)"
+export GID="$(id -g)"
+
 REPO="$(cd "$(dirname "$0")" && pwd)"
 OUT="$REPO/compare-output"
 
