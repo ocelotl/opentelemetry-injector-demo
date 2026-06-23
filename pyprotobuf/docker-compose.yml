@@ -41,3 +41,4 @@ services:
     command: ["--config=/etc/otelcol/collector-config.yaml"]
     volumes:
       - ./collector-config.yaml:/etc/otelcol/collector-config.yaml
+      - ../compare-output/pyprotobuf:/output

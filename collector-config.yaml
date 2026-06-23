@@ -10,9 +10,16 @@ processors:
 exporters:
   debug:
     verbosity: detailed
+  file/traces:
+    path: /output/traces.json
+  file/metrics:
+    path: /output/metrics.json
+  file/logs:
+    path: /output/logs.json
 
 service:
   pipelines:
+    # debug pipelines use the batch processor for readable grouped output
     traces:
       receivers: [otlp]
       processors: [batch]
@@ -25,3 +32,14 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [debug]
+    # file pipelines bypass the batch processor so writes happen immediately
+    # on receipt — data is on disk before the app container exits
+    traces/file:
+      receivers: [otlp]
+      exporters: [file/traces]
+    logs/file:
+      receivers: [otlp]
+      exporters: [file/logs]
+    metrics/file:
+      receivers: [otlp]
+      exporters: [file/metrics]
