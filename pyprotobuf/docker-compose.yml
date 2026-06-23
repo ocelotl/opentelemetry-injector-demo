@@ -7,6 +7,7 @@ services:
   # ---------------------------------------------------------------------------
   prepare-python-agent:
     image: python:3.13-slim
+    user: "${UID}:${GID}"
     working_dir: /workspace
     volumes:
       - .:/workspace
