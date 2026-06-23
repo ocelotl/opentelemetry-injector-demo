@@ -59,6 +59,9 @@ run_scenario() {
 log "Setup"
 rm -rf "$OUT"
 mkdir -p "$OUT/pyprotobuf" "$OUT/protobuf"
+# Pre-create python-agent dirs as the host user so Docker bind-mounts don't
+# recreate them as root (which would deny writes from the non-root container user).
+mkdir -p "$REPO/pyprotobuf/python-agent" "$REPO/protobuf/python-agent"
 
 run_scenario "pyprotobuf" "$REPO/pyprotobuf"
 run_scenario "protobuf"   "$REPO/protobuf"
