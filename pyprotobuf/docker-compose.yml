@@ -2,22 +2,22 @@ services:
 
   # ---------------------------------------------------------------------------
   # Installs OTel API/SDK + instrumentation libraries + the pure-Python pyproto
-  # exporter stack (no google.protobuf) from local source, then copies
-  # sitecustomize.py into the agent directory.
+  # exporter stack (no google.protobuf) from the public pyproto branch of
+  # opentelemetry-python, then copies sitecustomize.py into the agent directory.
   # ---------------------------------------------------------------------------
   prepare-python-agent:
     image: python:3.13-slim
-    user: "${SCRIPT_UID}:${SCRIPT_GID}"
     working_dir: /workspace
     volumes:
       - .:/workspace
       - ./python-agent:/python-agent
-      - /home/tigre/github/ocelotl/opentelemetry/opentelemetry-python:/opentelemetry-python:ro
     command: >
       sh -lc "
+        apt-get update -qq && apt-get install -y --no-install-recommends git &&
         rm -rf /python-agent/* &&
-        pip install --no-cache-dir --target /python-agent opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-requests opentelemetry-instrumentation-logging requests /opentelemetry-python/opentelemetry-pyproto /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-common /opentelemetry-python/exporter/opentelemetry-exporter-otlp-pyproto-http &&
+        pip install --no-cache-dir --target /python-agent opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-requests opentelemetry-instrumentation-logging requests 'opentelemetry-pyproto @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=opentelemetry-pyproto' 'opentelemetry-exporter-otlp-pyproto-common @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=exporter/opentelemetry-exporter-otlp-pyproto-common' 'opentelemetry-exporter-otlp-pyproto-http @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=exporter/opentelemetry-exporter-otlp-pyproto-http' &&
         cp /workspace/sitecustomize.py /python-agent/sitecustomize.py &&
+        chown -R ${SCRIPT_UID}:${SCRIPT_GID} /python-agent &&
         echo 'prepare-python-agent: done'
       "
 

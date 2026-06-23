@@ -134,7 +134,11 @@ run_scenario() {
     log "Running $name"
     docker compose -f "$dir/docker-compose.yml" up --detach
     docker compose -f "$dir/docker-compose.yml" wait app
-    docker compose -f "$dir/docker-compose.yml" down --timeout 5
+    # Give the collector a moment to flush file exports after the app's final
+    # SDK force_flush completes — the OTLP request may arrive at the collector
+    # just as docker compose down would otherwise send SIGTERM.
+    sleep 3
+    docker compose -f "$dir/docker-compose.yml" down --timeout 10
     echo "$name: done"
 }
 
