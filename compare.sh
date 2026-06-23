@@ -18,24 +18,52 @@ OUT="$REPO/compare-output"
 
 log() { echo; echo "=== $* ==="; }
 
-# Normalise one signal file for comparison:
-#   • remove time-varying IDs (traceId, spanId, parentSpanId)
-#   • remove all timestamps (*UnixNano)
-#   • remove histogram timing values (sum, min, max, bucketCounts, explicitBounds)
-#     because actual HTTP latencies differ between runs
-#   • replace service.name strings so both scenarios compare as "SCENARIO"
-#   • sort top-level export-request objects for deterministic ordering
+# Normalise one signal file for comparison. Strips or sorts everything that
+# legitimately differs between two runs of the same app:
+#   • OTLP IDs (traceId, spanId, parentSpanId) and all *UnixNano timestamps
+#   • Histogram timing values (sum, min, max, bucketCounts, explicitBounds)
+#   • duration_ms event attribute — actual HTTP latency, changes every run
+#   • otelSpanID / otelTraceID / otelTraceSampled — trace IDs injected by the
+#     logging instrumentation into log record attributes
+#   • Sorts spans by name, log records by (severity, body), attributes by key,
+#     and span events by name — so ordering differences don't cause false diffs
+#   • Normalises service.name to SCENARIO so scenario names don't matter
 normalize() {
     local file=$1
     jq -rs '
       [ .[] |
         walk(
           if type == "object" then
+            # Strip time-varying OTLP fields
             del(.traceId, .spanId, .parentSpanId,
                 .startTimeUnixNano, .endTimeUnixNano,
                 .timeUnixNano, .observedTimeUnixNano) |
+            # Strip histogram timing buckets
             if has("bucketCounts") then
               del(.sum, .min, .max, .bucketCounts, .explicitBounds)
+            else . end |
+            # Strip and sort attribute arrays
+            if has("attributes") then
+              .attributes = (.attributes |
+                map(select(
+                  .key != "duration_ms" and
+                  .key != "otelSpanID" and
+                  .key != "otelTraceID" and
+                  .key != "otelTraceSampled"
+                )) |
+                sort_by(.key))
+            else . end |
+            # Sort span events by name; sort their attributes too
+            if has("events") then
+              .events |= (map(.attributes |= sort_by(.key)) | sort_by(.name))
+            else . end |
+            # Sort spans by name for deterministic ordering across batches
+            if has("spans") then
+              .spans |= sort_by(.name)
+            else . end |
+            # Sort log records by (severity, body) for deterministic ordering
+            if has("logRecords") then
+              .logRecords |= sort_by([.severityNumber, (.body.stringValue // "")])
             else . end
           else . end
         )
