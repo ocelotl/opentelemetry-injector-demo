@@ -1,4 +1,4 @@
-"""OTel bootstrap injected via PYTHONPATH / sitecustomize.py mechanism.
+"""OTel bootstrap injected via the OpenTelemetry Injector (LD_PRELOAD).
 
 Configures the OpenTelemetry SDK with the standard OTLP HTTP exporter backed
 by google.protobuf.
