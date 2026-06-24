@@ -39,7 +39,8 @@ normalize_traces() {
       [
         .[] | .resourceSpans[] as $rs | $rs.scopeSpans[] as $ss | $ss.spans[] |
         {
-          "resource": ($rs.resource.attributes // [] | sort_by(.key)),
+          "resource": ($rs.resource.attributes // [] |
+            map(select(.key != "service.instance.id")) | sort_by(.key)),
           "scope":    $ss.scope.name,
           "name":     .name,
           "kind":     .kind,
@@ -65,7 +66,8 @@ normalize_metrics() {
         # app.request_size uses fixed synthetic values, so its full data is compared.
         . as $metric |
         {
-          "resource": ($rm.resource.attributes // [] | sort_by(.key)),
+          "resource": ($rm.resource.attributes // [] |
+            map(select(.key != "service.instance.id")) | sort_by(.key)),
           "name":     .name,
           "unit":     .unit,
           "type": (
