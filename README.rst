@@ -122,15 +122,25 @@ Both scenarios exercise the same telemetry features:
 Injection mechanism
 ===================
 
-Both scenarios use the PYTHONPATH + ``sitecustomize.py`` approach:
+Both scenarios use the `OpenTelemetry Injector
+<https://github.com/open-telemetry/opentelemetry-injector>`_ (``LD_PRELOAD``):
 
 1. A ``prepare-python-agent`` Docker service installs all packages into
-   ``./python-agent/``.
-2. The app container mounts that directory and sets it on ``PYTHONPATH``.
-3. Python automatically executes ``sitecustomize.py`` before any user code,
+   ``./python-agent/glibc/`` (the libc-flavour subdirectory the injector
+   expects).
+2. The app container installs the ``opentelemetry-injector`` ``.deb`` package
+   and writes ``/etc/opentelemetry/injector/injector.conf`` with the agent
+   path prefix, then launches Python with
+   ``LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so``.
+3. At process start the injector reads ``injector.conf``, detects the libc
+   flavour, appends ``glibc/`` to the configured path prefix, and prepends
+   the result to ``PYTHONPATH``.
+4. Python automatically executes ``sitecustomize.py`` before any user code,
    which wires up the SDK and exporters.
 
-The application source code (``app.py``) contains no OpenTelemetry imports.
+The application source code (``app.py``) uses the OpenTelemetry API (tracing,
+metrics) but contains no SDK or exporter configuration — all wiring is handled
+by the injected ``sitecustomize.py``.
 
 Running a single scenario manually
 ====================================

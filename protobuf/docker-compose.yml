@@ -3,7 +3,9 @@ services:
   # ---------------------------------------------------------------------------
   # Installs OTel API/SDK + instrumentation libraries + the standard OTLP HTTP
   # exporter backed by google.protobuf from PyPI, then copies sitecustomize.py
-  # into the agent directory.
+  # into the agent directory.  Packages go into glibc/ because the
+  # OpenTelemetry Injector appends the detected libc flavour to
+  # the path prefix configured in injector.conf.
   # ---------------------------------------------------------------------------
   prepare-python-agent:
     image: python:3.13-slim
@@ -15,8 +17,9 @@ services:
     command: >
       sh -lc "
         rm -rf /python-agent/* &&
-        pip install --no-cache-dir --target /python-agent opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-requests opentelemetry-instrumentation-logging opentelemetry-exporter-otlp-proto-http requests &&
-        cp /workspace/sitecustomize.py /python-agent/sitecustomize.py &&
+        mkdir -p /python-agent/glibc &&
+        pip install --no-cache-dir --target /python-agent/glibc opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-requests opentelemetry-instrumentation-logging opentelemetry-exporter-otlp-proto-http requests &&
+        cp /workspace/sitecustomize.py /python-agent/glibc/sitecustomize.py &&
         echo 'prepare-python-agent: done'
       "
 
@@ -27,9 +30,17 @@ services:
       - ..:/app
       - ./python-agent:/python-agent
     environment:
-      PYTHONPATH: /python-agent
       OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
-    command: python app.py
+    command: >
+      sh -lc "
+        apt-get update -qq && apt-get install -y --no-install-recommends curl ca-certificates &&
+        ARCH=$$(dpkg --print-architecture) &&
+        curl -fsSL -o /tmp/otel-injector.deb https://github.com/open-telemetry/opentelemetry-injector/releases/download/v0.9.0/opentelemetry-injector_0.9.0_$${ARCH}.deb &&
+        dpkg -i /tmp/otel-injector.deb &&
+        rm /tmp/otel-injector.deb &&
+        printf 'python_auto_instrumentation_agent_path_prefix=/python-agent\n' > /etc/opentelemetry/injector/injector.conf &&
+        LD_PRELOAD=/usr/lib/opentelemetry/libotelinject.so python app.py
+      "
     depends_on:
       prepare-python-agent:
         condition: service_completed_successfully
