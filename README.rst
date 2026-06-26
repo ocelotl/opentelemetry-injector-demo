@@ -9,68 +9,59 @@ pure-Python protobuf implementation with **no** ``google.protobuf`` dependency
 
 Two self-contained Docker Compose scenarios run the same application with the
 same OTel Collector configuration and the same injection mechanism.  The only
-difference between them is the exporter package.  A comparison script runs
-both, captures their OTLP output as JSON files, normalises away run-to-run
+difference between them is the exporter package.  A pytest suite runs both,
+captures their OTLP output as JSON files, normalises away run-to-run
 variation (timestamps, trace IDs, network latency), and diffs the results.
 
 Prerequisites
 =============
 
 - Docker with the Compose plugin v2.7+ (``docker compose``)
-- ``jq``
+- `uv <https://docs.astral.sh/uv/>`_
 
 No other local tooling or repository checkouts are required.  All Python
-packages are installed inside Docker containers at runtime.
+packages used by the application are installed inside Docker containers at
+runtime.
 
 Quick start: running the comparison
 =====================================
 
 ::
 
-    bash compare.sh
+    uv run pytest tests/ -v
 
-The script:
+This will:
 
-1. Deletes any previous output in ``compare-output/``.
-2. Runs the ``pyprotobuf`` scenario end-to-end: installs packages, starts the
+1. Delete any previous output in ``compare-output/``.
+2. Run the ``pyprotobuf`` scenario end-to-end: installs packages, starts the
    app, waits for it to finish, stops all containers.
-3. Runs the ``protobuf`` scenario the same way.
-4. Normalises both scenarios' OTLP JSON output (see *What is compared* below).
-5. Diffs the normalised output signal by signal and reports the result.
-
-Expected output when both exporters are equivalent::
-
-    === Setup ===
-
-    === Running pyprotobuf ===
-    ...
-    pyprotobuf: done
-
-    === Running protobuf ===
-    ...
-    protobuf: done
-
-    === Comparing outputs ===
-      OK       traces
-      OK       metrics
-      OK       logs
-
-    All signals match — pyprotobuf and protobuf produce equivalent telemetry.
-
-If any signal differs, ``compare.sh`` exits with status 1 and prints a unified
-diff showing exactly which normalised fields do not match.
+3. Run the ``protobuf`` scenario the same way.
+4. Normalise both scenarios' OTLP JSON output (see *What is compared* below).
+5. Assert signal by signal that the normalised output is identical.
 
 The first run takes several minutes because Docker pulls images and the
 ``pyprotobuf`` scenario clones ``opentelemetry-python`` from GitHub to install
 the pyproto packages.  Subsequent runs reuse Docker layer cache and complete
 much faster.
 
+Skipping Docker (use existing output)
+--------------------------------------
+
+If you have already run the scenarios and just want to re-run the test logic
+without re-running Docker::
+
+    uv run pytest tests/ --no-docker -v
+
+To test against output captured in an arbitrary directory::
+
+    uv run pytest tests/ --output-dir /path/to/output -v
+
 What is compared
 ================
 
 The OTel Collector writes raw OTLP/JSON to ``compare-output/<scenario>/``
 (one file per signal: ``traces.json``, ``metrics.json``, ``logs.json``).
-Before diffing, ``compare.sh`` normalises each file to remove legitimate
+Before comparing, the test suite normalises each file to remove legitimate
 run-to-run variation:
 
 **Traces** — flattened to a list of spans; compared on: span name, kind,
@@ -94,6 +85,9 @@ scenario-specific working-directory path with a placeholder.
 **Logs** — flattened to a list of records across all OTLP batches; compared
 on: severity number/text, body, attribute key/value pairs.  Stripped: trace
 correlation attributes (``otelSpanID``, ``otelTraceID``, ``otelTraceSampled``).
+
+On failure each test prints a full unified diff of the normalised outputs so
+the exact discrepancy is visible without any additional tooling.
 
 Scenarios
 =========

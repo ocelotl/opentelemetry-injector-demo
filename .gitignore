@@ -1,2 +1,4 @@
 compare-output/
 */python-agent/
+tests/__pycache__
+.venv/

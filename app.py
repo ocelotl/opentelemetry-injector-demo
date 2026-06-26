@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import logging
-import time
+from logging import getLogger
+from time import monotonic
 
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Status, StatusCode
 from requests import get
 
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
 tracer = trace.get_tracer("demo")
 meter = metrics.get_meter("demo")
 
@@ -71,9 +71,9 @@ for index in range(10):
         span.add_event("request.started", {"index": index, "url": url})
 
         try:
-            t0 = time.monotonic()
+            t0 = monotonic()
             response = get(url, timeout=2)
-            duration_ms = (time.monotonic() - t0) * 1000
+            duration_ms = (monotonic() - t0) * 1000
 
             request_counter.add(1, {"http.status_code": str(response.status_code)})
             request_duration.record(duration_ms, {"http.status_code": str(response.status_code)})
