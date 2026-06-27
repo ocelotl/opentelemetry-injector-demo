@@ -1,11 +1,14 @@
 services:
 
   # ---------------------------------------------------------------------------
-  # Installs the OTel SDK (from the pyproto branch of ocelotl/opentelemetry-python,
-  # which includes the instrumentation.python declarative config support) plus
-  # Flask and opentelemetry-instrumentation-flask into python-agent/glibc/.
-  # PYTHONPATH on the app container adds that directory to sys.path, so Python
-  # auto-executes sitecustomize.py before any application code.
+  # Builds a virtual environment in ./python-agent/venv with:
+  #   - OTel SDK from pyproto branch of ocelotl/opentelemetry-python (which
+  #     includes the instrumentation.python declarative config changes)
+  #   - Flask + FlaskInstrumentor (installed --no-deps to bypass the strict
+  #     opentelemetry-semantic-conventions==0.64b0 pin; the pyproto branch
+  #     ships 0.65b0.dev0 which is API-compatible)
+  # sitecustomize.py is placed in the venv's site-packages so Python runs it
+  # automatically before any application code.
   # ---------------------------------------------------------------------------
   prepare-python-agent:
     image: python:3.13-slim
@@ -16,28 +19,35 @@ services:
       - sh
       - -lc
       - |
+        set -e
         apt-get update -qq && apt-get install -y --no-install-recommends git
         rm -rf /python-agent/*
-        mkdir -p /python-agent/glibc
-        pip install --no-cache-dir --target /python-agent/glibc \
+        python -m venv /python-agent/venv
+        /python-agent/venv/bin/pip install --no-cache-dir \
           pyyaml \
           jsonschema \
           flask \
-          opentelemetry-instrumentation-flask \
+          wrapt \
+          packaging \
           'opentelemetry-api @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=opentelemetry-api' \
           'opentelemetry-sdk @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=opentelemetry-sdk' \
           'opentelemetry-semantic-conventions @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=opentelemetry-semantic-conventions' \
+          'opentelemetry-proto-json @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=opentelemetry-proto-json' \
           'opentelemetry-exporter-otlp-json-common @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=exporter/opentelemetry-exporter-otlp-json-common' \
           'opentelemetry-exporter-otlp-json-file @ git+https://github.com/ocelotl/opentelemetry-python@pyproto#subdirectory=exporter/opentelemetry-exporter-otlp-json-file'
-        cp /workspace/sitecustomize.py /python-agent/glibc/sitecustomize.py
+        /python-agent/venv/bin/pip install --no-cache-dir --no-deps \
+          opentelemetry-instrumentation==0.64b0 \
+          opentelemetry-util-http==0.64b0 \
+          opentelemetry-instrumentation-wsgi==0.64b0 \
+          opentelemetry-instrumentation-flask==0.64b0
+        cp /workspace/sitecustomize.py /python-agent/venv/lib/python3.13/site-packages/sitecustomize.py
         echo 'prepare-python-agent: done'
 
   # ---------------------------------------------------------------------------
-  # Runs the Flask app.  PYTHONPATH causes Python to find sitecustomize.py in
-  # python-agent/glibc/ and execute it before app.py.  sitecustomize.py calls
-  # configure_sdk(), which reads otel-config.yaml and calls
-  # FlaskInstrumentor().instrument() via the instrumentation/development.python
-  # section — without any explicit OTel code in app.py.
+  # Runs the Flask app using the venv built by prepare-python-agent.
+  # sitecustomize.py in the venv's site-packages is executed automatically
+  # before app.py, calling configure_sdk() which reads otel-config.yaml and
+  # activates FlaskInstrumentor via instrumentation/development.python.flask.
   #
   # Trace/metric/log JSONL is written to ./output/ (mounted at /output).
   # ---------------------------------------------------------------------------
@@ -49,14 +59,13 @@ services:
       - ./python-agent:/python-agent
       - ./output:/output
     environment:
-      PYTHONPATH: /python-agent/glibc
       OTEL_CONFIG_FILE: /app/otel-config.yaml
     ports:
       - "5000:5000"
     command:
       - sh
       - -lc
-      - PYTHONPATH=/python-agent/glibc python app.py
+      - /python-agent/venv/bin/python app.py
     depends_on:
       prepare-python-agent:
         condition: service_completed_successfully
@@ -67,19 +76,12 @@ services:
   # ---------------------------------------------------------------------------
   traffic:
     image: python:3.13-slim
+    working_dir: /app
+    volumes:
+      - .:/app
     command:
       - sh
       - -lc
-      - |
-        pip install -q requests
-        python - <<'EOF'
-import time, requests
-
-time.sleep(3)
-for path in ['/', '/items/1', '/items/2', '/items/42']:
-    r = requests.get(f'http://app:5000{path}')
-    print(f'traffic: {path} -> {r.status_code}', flush=True)
-print('traffic: done', flush=True)
-EOF
+      - pip install -q requests && python traffic.py
     depends_on:
       - app
